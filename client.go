@@ -684,6 +684,60 @@ type closerFunc func() error
 
 func (c closerFunc) Close() error { return c() }
 
+func (c *Client) hijack_raw(method, path string, hijackOptions hijackOptions) (net.Conn, *bufio.ReadWriter, error) {
+		if path != "/version" && !c.SkipServerVersionCheck && c.expectedAPIVersion == nil {
+			err := c.checkAPIVersion()
+			if err != nil {
+				return nil, err
+			}
+		}
+		var params io.Reader
+		if hijackOptions.data != nil {
+			buf, err := json.Marshal(hijackOptions.data)
+			if err != nil {
+				return nil, err
+			}
+			params = bytes.NewBuffer(buf)
+		}
+		req, err := http.NewRequest(method, c.getURL(path), params)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Connection", "Upgrade")
+		req.Header.Set("Upgrade", "tcp")
+		protocol := c.endpointURL.Scheme
+		address := c.endpointURL.Path
+		if protocol != "unix" {
+			protocol = "tcp"
+			address = c.endpointURL.Host
+		}
+		var dial net.Conn
+		if c.TLSConfig != nil && protocol != "unix" {
+			dial, err = tlsDialWithDialer(c.Dialer, protocol, address, c.TLSConfig)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			dial, err = c.Dialer.Dial(protocol, address)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		errs := make(chan error, 1)
+		quit := make(chan struct{})
+		clientconn := httputil.NewClientConn(dial, nil)
+		defer clientconn.Close()
+		clientconn.Do(req)
+		if hijackOptions.success != nil {
+			hijackOptions.success <- struct{}{}
+			<-hijackOptions.success
+		}
+		rwc, br := clientconn.Hijack()
+		return rwc, br
+}
+
 func (c *Client) hijack(method, path string, hijackOptions hijackOptions) (CloseWaiter, error) {
 	if path != "/version" && !c.SkipServerVersionCheck && c.expectedAPIVersion == nil {
 		err := c.checkAPIVersion()

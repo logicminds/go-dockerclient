@@ -1287,6 +1287,24 @@ func (c *Client) AttachToContainer(opts AttachToContainerOptions) error {
 // This function does not block.
 //
 // See https://goo.gl/NKpkFk for more details.
+func (c *Client) AttachToContainerSocket(opts AttachToContainerOptions) (net.Conn, *bufio.ReadWriter, error) {
+	if opts.Container == "" {
+		return nil, &NoSuchContainer{ID: opts.Container}
+	}
+	path := "/containers/" + opts.Container + "/attach?" + queryString(opts)
+	return c.hijack_raw("POST", path, hijackOptions{
+		success:        opts.Success,
+		setRawTerminal: opts.RawTerminal,
+		in:             opts.InputStream,
+		stdout:         opts.OutputStream,
+		stderr:         opts.ErrorStream,
+	})
+}
+
+// AttachToContainerNonBlocking attaches to a container, using the given options.
+// This function does not block.
+//
+// See https://goo.gl/NKpkFk for more details.
 func (c *Client) AttachToContainerNonBlocking(opts AttachToContainerOptions) (CloseWaiter, error) {
 	if opts.Container == "" {
 		return nil, &NoSuchContainer{ID: opts.Container}
